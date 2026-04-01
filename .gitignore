@@ -3,5 +3,7 @@ dist/
 .DS_Store
 *.log
 keluarga.db
-backend/uploads/*
-!backend/uploads/.gitkeep
+backend-go/uploads/*
+!backend-go/uploads/.gitkeep
+frontend/dist/
+*.exe
