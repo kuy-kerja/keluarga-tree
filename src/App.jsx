@@ -10,6 +10,7 @@ function App() {
   const [selected, setSelected] = useState(null)
   const [treeData, setTreeData] = useState([])
   const [filterGender, setFilterGender] = useState('')
+  const [showPasangan, setShowPasangan] = useState(false)
   const canvasRef = useRef(null)
 
   useEffect(() => {
@@ -35,11 +36,12 @@ function App() {
     if (editId) {
       await fetch(`${API}/anggota/${editId}`, { method: 'PUT', body: data })
     } else {
-      await fetch(`${API}/anggota}`, { method: 'POST', body: data })
+      await fetch(`${API}/anggota`, { method: 'POST', body: data })
     }
     
     setForm({})
     setEditId(null)
+    setShowPasangan(false)
     await loadAnggota()
     await loadTree()
     setPage('tree')
@@ -56,6 +58,7 @@ function App() {
   function startEdit(person) {
     setForm(person)
     setEditId(person.id)
+    setShowPasangan(!!person.id_pasangan)
     setPage('add')
   }
 
@@ -63,70 +66,107 @@ function App() {
     const canvas = canvasRef.current
     if (!canvas) return
     const ctx = canvas.getContext('2d')
-    const W = canvas.width = 1200
-    const H = canvas.height = 800
+    const W = canvas.width = 1400
+    const H = canvas.height = 1000
     ctx.clearRect(0, 0, W, H)
 
-    function drawPerson(x, y, person, level) {
-      const colors = { L: '#3B82F6', P: '#EC4899' }
-      const color = colors[person.jenis_kelamin] || '#6B7280'
-      const cardW = 160
-      const cardH = 70
+    const drawn = new Set()
 
-      // Card background
-      ctx.fillStyle = '#ffffff'
-      ctx.strokeStyle = color
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.roundRect(x - cardW/2, y - cardH/2, cardW, cardH, 8)
-      ctx.fill()
-      ctx.stroke()
+    function drawCouple(x, y, person, pasangan) {
+      const cardW = 150
+      const cardH = 65
+      const gap = pasangan ? 20 : 0
+      const totalW = pasangan ? cardW * 2 + gap : cardW
+      const startX = x - totalW / 2
 
-      // Name
-      ctx.fillStyle = '#1F2937'
-      ctx.font = 'bold 13px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.fillText(person.nama.substring(0, 18), x, y - 8)
-
-      // Info
-      ctx.fillStyle = '#6B7280'
-      ctx.font = '11px sans-serif'
-      const info = person.tanggal_lahir || ''
-      ctx.fillText(info, x, y + 8)
-
-      // Gender badge
-      ctx.fillStyle = color
-      ctx.font = '10px sans-serif'
-      ctx.fillText(person.jenis_kelamin === 'L' ? 'Laki-laki' : 'Perempuan', x, y + 22)
-    }
-
-    function drawLines(from, children) {
-      ctx.strokeStyle = '#D1D5DB'
-      ctx.lineWidth = 2
-      children.forEach(child => {
+      function drawCard(cx, cy, p) {
+        if (!p) return
+        const colors = { L: '#3B82F6', P: '#EC4899' }
+        const color = colors[p.jenis_kelamin] || '#6B7280'
+        
+        ctx.fillStyle = '#ffffff'
+        ctx.strokeStyle = color
+        ctx.lineWidth = 2
         ctx.beginPath()
-        ctx.moveTo(from.x, from.y + 35)
-        ctx.lineTo(from.x, from.y + 60)
-        ctx.lineTo(child.x, from.y + 60)
-        ctx.lineTo(child.x, child.y - 35)
+        ctx.roundRect(cx - cardW/2, cy - cardH/2, cardW, cardH, 8)
+        ctx.fill()
         ctx.stroke()
-      })
+
+        ctx.fillStyle = '#1F2937'
+        ctx.font = 'bold 12px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(p.nama.substring(0, 18), cx, cy - 10)
+
+        ctx.fillStyle = '#6B7280'
+        ctx.font = '10px sans-serif'
+        ctx.fillText(p.tanggal_lahir || '', cx, cy + 2)
+        ctx.fillText(p.jenis_kelamin === 'L' ? '♂ Laki-laki' : '♀ Perempuan', cx, cy + 16)
+      }
+
+      // Draw person
+      const px = startX + cardW/2
+      drawCard(px, y, person)
+
+      // Draw spouse line & card
+      if (pasangan) {
+        // Heart line
+        ctx.strokeStyle = '#F59E0B'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(px + cardW/2, y)
+        ctx.lineTo(px + cardW/2 + gap, y)
+        ctx.stroke()
+
+        // Heart
+        ctx.fillStyle = '#F59E0B'
+        ctx.font = '14px sans-serif'
+        ctx.fillText('♥', px + cardW/2 + gap/2, y - 5)
+
+        // Wedding date
+        if (person.tanggal_nikah || pasangan.tanggal_nikah) {
+          ctx.fillStyle = '#92400E'
+          ctx.font = '9px sans-serif'
+          ctx.fillText(`💑 ${person.tanggal_nikah || pasangan.tanggal_nikah}`, px + cardW/2 + gap/2, y + 5)
+        }
+
+        // Spouse card
+        const sx = startX + cardW + gap + cardW/2
+        drawCard(sx, y, pasangan)
+      }
+
+      return { x, y, w: totalW, couple: [person, pasangan].filter(Boolean) }
     }
 
     function layoutTree(node, x, y, spacing) {
-      if (!node) return []
-      const cards = [{ x, y, person: node }]
-      
+      if (!node || drawn.has(node.id)) return []
+      drawn.add(node.id)
+
+      const cards = []
+      const coupleInfo = drawCouple(x, y, node, node.pasangan)
+      if (coupleInfo) {
+        cards.push(coupleInfo)
+        if (node.pasangan) drawn.add(node.pasangan.id)
+      }
+
       if (node.anak && node.anak.length > 0) {
-        const childSpacing = Math.max(spacing / node.anak.length, 180)
+        const childSpacing = Math.max(spacing / node.anak.length, 170)
         const startX = x - (node.anak.length - 1) * childSpacing / 2
+        const childY = y + 110
 
         node.anak.forEach((child, i) => {
           const cx = startX + i * childSpacing
-          const cy = y + 100
-          const childCards = layoutTree(child, cx, cy, childSpacing)
+          const childCards = layoutTree(child, cx, childY, childSpacing)
           cards.push(...childCards)
-          drawLines({ x, y }, childCards.filter(c => c.person === child))
+
+          // Draw connection lines
+          ctx.strokeStyle = '#D1D5DB'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(x, y + 32)
+          ctx.lineTo(x, y + 55)
+          ctx.lineTo(cx, y + 55)
+          ctx.lineTo(cx, childY - 32)
+          ctx.stroke()
         })
       }
 
@@ -134,19 +174,17 @@ function App() {
     }
 
     // Draw tree
-    let startX = 100
+    let offsetX = 200
     treeData.forEach((root, i) => {
-      const y = 80
-      const cards = layoutTree(root, startX + i * 300, y, 250)
-      cards.forEach(card => drawPerson(card.x, card.y, card.person, 0))
+      layoutTree(root, offsetX + i * 350, 80, 300)
     })
 
-    // If no data
+    // Empty state
     if (treeData.length === 0) {
       ctx.fillStyle = '#9CA3AF'
       ctx.font = '16px sans-serif'
       ctx.textAlign = 'center'
-      ctx.fillText('Belum ada data. Tambahkan anggota keluarga dulu!', W/2, H/2)
+      ctx.fillText('Belum ada data. Klik "Tambah" untuk mulai!', W/2, H/2)
     }
   }
 
@@ -165,7 +203,7 @@ function App() {
         <nav>
           <button className={page==='tree'?'active':''} onClick={() => setPage('tree')}>Pohon</button>
           <button className={page==='list'?'active':''} onClick={() => setPage('list')}>Daftar</button>
-          <button className={page==='add'?'active':''} onClick={() => { setForm({}); setEditId(null); setPage('add') }}>Tambah</button>
+          <button className={page==='add'?'active':''} onClick={() => { setForm({}); setEditId(null); setShowPasangan(false); setPage('add') }}>Tambah</button>
         </nav>
       </header>
 
@@ -173,8 +211,10 @@ function App() {
       {page === 'tree' && (
         <div className="tree-container">
           <canvas ref={canvasRef} className="tree-canvas" />
-          <div className="tree-info">
-            <p>Klik "Daftar" untuk melihat detail semua anggota</p>
+          <div className="tree-legend">
+            <span>🔵 Laki-laki</span>
+            <span>🔴 Perempuan</span>
+            <span>💛 Nikah</span>
           </div>
         </div>
       )}
@@ -207,6 +247,7 @@ function App() {
                   <div className="card-info">
                     <h3>{person.nama}</h3>
                     <p>{person.jenis_kelamin === 'L' ? 'Laki-laki' : 'Perempuan'} {person.tanggal_lahir ? `• ${person.tanggal_lahir}` : ''}</p>
+                    {person.tanggal_nikah && <p className="wedding-badge">💑 {person.tanggal_nikah}</p>}
                   </div>
                 </div>
               ))}
@@ -287,7 +328,7 @@ function App() {
 
             <div className="form-group">
               <label>Pasangan</label>
-              <select value={form.id_pasangan || ''} onChange={e => setForm({...form, id_pasangan: e.target.value || null})}>
+              <select value={form.id_pasangan || ''} onChange={e => { setForm({...form, id_pasangan: e.target.value || null}); setShowPasangan(!!e.target.value) }}>
                 <option value="">-- Tidak ada --</option>
                 {anggota.filter(a => a.id !== editId).map(a => (
                   <option key={a.id} value={a.id}>{a.nama} ({a.jenis_kelamin === 'L' ? 'L' : 'P'})</option>
@@ -295,8 +336,15 @@ function App() {
               </select>
             </div>
 
+            {showPasangan && (
+              <div className="form-group wedding-group">
+                <label>💑 Tanggal Pernikahan</label>
+                <input type="date" value={form.tanggal_nikah || ''} onChange={e => setForm({...form, tanggal_nikah: e.target.value})} />
+              </div>
+            )}
+
             <button type="submit" className="btn btn-primary">{editId ? 'Simpan' : 'Tambah'}</button>
-            <button type="button" className="btn btn-secondary" onClick={() => { setForm({}); setEditId(null); setPage('tree') }}>Batal</button>
+            <button type="button" className="btn btn-secondary" onClick={() => { setForm({}); setEditId(null); setShowPasangan(false); setPage('tree') }}>Batal</button>
           </form>
         </div>
       )}
@@ -324,6 +372,7 @@ function App() {
               {selected.id_ayah && <div><span>Ayah:</span> {anggota.find(a => a.id === selected.id_ayah)?.nama || '-'}</div>}
               {selected.id_ibu && <div><span>Ibu:</span> {anggota.find(a => a.id === selected.id_ibu)?.nama || '-'}</div>}
               {selected.id_pasangan && <div><span>Pasangan:</span> {anggota.find(a => a.id === selected.id_pasangan)?.nama || '-'}</div>}
+              {selected.tanggal_nikah && <div><span>Tanggal Nikah:</span> 💑 {selected.tanggal_nikah}</div>}
             </div>
             <div className="modal-actions">
               <button className="btn btn-primary" onClick={() => { startEdit(selected); setSelected(null) }}>Edit</button>

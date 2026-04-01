@@ -47,6 +47,7 @@ db.exec(`
     id_ayah INTEGER REFERENCES anggota(id),
     id_ibu INTEGER REFERENCES anggota(id),
     id_pasangan INTEGER REFERENCES anggota(id),
+    tanggal_nikah TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   )
 `);
@@ -67,17 +68,17 @@ app.get('/api/anggota/:id', (req, res) => {
 
 // Add anggota
 app.post('/api/anggota', upload.single('foto'), (req, res) => {
-  const { nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, id_ayah, id_ibu, id_pasangan } = req.body;
+  const { nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, id_ayah, id_ibu, id_pasangan, tanggal_nikah } = req.body;
   const foto = req.file ? req.file.filename : null;
   
   const result = db.prepare(`
-    INSERT INTO anggota (nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, foto, id_ayah, id_ibu, id_pasangan)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(nama, nama_panggilan || null, jenis_kelamin, tanggal_lahir || null, tanggal_wafat || null, tempat_lahir || null, pekerjaan || null, foto, id_ayah || null, id_ibu || null, id_pasangan || null);
+    INSERT INTO anggota (nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, foto, id_ayah, id_ibu, id_pasangan, tanggal_nikah)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(nama, nama_panggilan || null, jenis_kelamin, tanggal_lahir || null, tanggal_wafat || null, tempat_lahir || null, pekerjaan || null, foto, id_ayah || null, id_ibu || null, id_pasangan || null, tanggal_nikah || null);
 
-  // Jika ada pasangan, update juga pasangan
+  // Jika ada pasangan, update juga pasangan & tanggal nikah
   if (id_pasangan) {
-    db.prepare('UPDATE anggota SET id_pasangan = ? WHERE id = ?').run(result.lastInsertRowid, id_pasangan);
+    db.prepare('UPDATE anggota SET id_pasangan = ?, tanggal_nikah = ? WHERE id = ?').run(result.lastInsertRowid, tanggal_nikah || null, id_pasangan);
   }
 
   res.json({ id: result.lastInsertRowid, foto });
@@ -85,11 +86,11 @@ app.post('/api/anggota', upload.single('foto'), (req, res) => {
 
 // Update anggota
 app.put('/api/anggota/:id', upload.single('foto'), (req, res) => {
-  const { nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, id_ayah, id_ibu, id_pasangan } = req.body;
+  const { nama, nama_panggilan, jenis_kelamin, tanggal_lahir, tanggal_wafat, tempat_lahir, pekerjaan, id_ayah, id_ibu, id_pasangan, tanggal_nikah } = req.body;
   const id = req.params.id;
 
   // Get existing to handle old foto
-  const existing = db.prepare('SELECT foto FROM anggota WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT foto, id_pasangan FROM anggota WHERE id = ?').get(id);
   let foto = existing?.foto;
 
   if (req.file) {
@@ -102,9 +103,14 @@ app.put('/api/anggota/:id', upload.single('foto'), (req, res) => {
   }
 
   db.prepare(`
-    UPDATE anggota SET nama=?, nama_panggilan=?, jenis_kelamin=?, tanggal_lahir=?, tanggal_wafat=?, tempat_lahir=?, pekerjaan=?, foto=?, id_ayah=?, id_ibu=?, id_pasangan=?
+    UPDATE anggota SET nama=?, nama_panggilan=?, jenis_kelamin=?, tanggal_lahir=?, tanggal_wafat=?, tempat_lahir=?, pekerjaan=?, foto=?, id_ayah=?, id_ibu=?, id_pasangan=?, tanggal_nikah=?
     WHERE id=?
-  `).run(nama, nama_panggilan || null, jenis_kelamin, tanggal_lahir || null, tanggal_wafat || null, tempat_lahir || null, pekerjaan || null, foto, id_ayah || null, id_ibu || null, id_pasangan || null, id);
+  `).run(nama, nama_panggilan || null, jenis_kelamin, tanggal_lahir || null, tanggal_wafat || null, tempat_lahir || null, pekerjaan || null, foto, id_ayah || null, id_ibu || null, id_pasangan || null, tanggal_nikah || null, id);
+
+  // Jika ada pasangan baru, update juga pasangan
+  if (id_pasangan && id_pasangan !== existing?.id_pasangan) {
+    db.prepare('UPDATE anggota SET id_pasangan = ?, tanggal_nikah = ? WHERE id = ?').run(id, tanggal_nikah || null, id_pasangan);
+  }
 
   res.json({ success: true });
 });
@@ -120,20 +126,25 @@ app.delete('/api/anggota/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// Family tree structure (with children)
+// Family tree structure (with children & spouses)
 app.get('/api/tree', (req, res) => {
   const all = db.prepare('SELECT * FROM anggota').all();
   
   const byId = {};
-  all.forEach(a => { byId[a.id] = { ...a, anak: [], cucu: [] }; });
+  all.forEach(a => { byId[a.id] = { ...a, anak: [], pasangan: null }; });
 
   // Build tree
   all.forEach(a => {
+    // Hubungan parent
     if (a.id_ayah || a.id_ibu) {
       const parentId = a.id_ayah || a.id_ibu;
       if (byId[parentId]) {
         byId[parentId].anak.push(byId[a.id]);
       }
+    }
+    // Hubungan pasangan
+    if (a.id_pasangan && byId[a.id_pasangan]) {
+      byId[a.id].pasangan = byId[a.id_pasangan];
     }
   });
 
